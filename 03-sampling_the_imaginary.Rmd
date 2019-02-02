@@ -1,0 +1,121 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+# 3. Sampling the Imaginary {-}
+
+```{r}
+library(rethinking)
+library(ggplot2)
+```
+
+## Easy {-}
+
+
+## Medium {-}
+
+### **3M1.** {-}
+
+```{r}
+p_grid <- seq(from=0,to=1,length.out=1000)
+posterior <- dbinom(8, 15, prob=p_grid) 
+plot(p_grid, posterior, type='l')
+```
+
+### **3M2.** {-}
+First, create and plot the sample.
+```{r}
+samp <- sample(p_grid, 1e4, replace=TRUE, prob=posterior)
+par(mfrow=c(1,2))
+plot(samp)
+dens(samp)
+```
+Then calculate the HPDI. I use the algorithm described by Hyndman in _Computing and graphing highest density regions_ 1996 as I understand it. I also calculate it using the `HPDI` function from the `rethinking` library. They differ slightly, but it appears my algorithm gives a more agreeable answer relative to the density plot than the `rethinking` library.
+```{r}
+d<-density(samp,n=1001)
+falpha <- quantile(d$y, c(.1))
+
+# Try the algorithm from the paper
+B <- order(d$y, decreasing = TRUE)
+y <- d$y[B]
+cumy <- cumsum(y)
+max_ind <- head(which(cumy > .9*tail(cumy,1)),1)-1
+
+subx <- d$x[sort(B[1:max_ind])]
+suby <- d$y[sort(B[1:max_ind])]
+
+plot.hpdi <- function(x, y, col='red'){
+  polygon(c(x,rev(x)), c(y,rep(0,length.out = length(y))), col=col)
+}
+
+par(mfrow=c(1,2))
+plot(d$x,d$y, type='l')
+#polygon(c(subx,rev(subx)),c(suby,rep(0,length.out=length(suby))), col="red")
+plot.hpdi(subx,suby)
+title('HPDI Calculated by hand')
+
+interval <- HPDI(samp, prob=.9)
+point_mask <- d$x > interval[1] & d$x < interval[2]
+subx2 <- d$x[point_mask]
+suby2 <- d$y[point_mask]
+plot(d$x, d$y, type='l')
+plot.hpdi(subx2, suby2)
+title('HPDI From rethinking Library')
+```
+
+### **3M3.** {-}
+
+```{r}
+obs <- rbinom(length(samp), 15, samp)
+simplehist(obs, main='Posterior Predictive Check')
+```
+There is a `r sum(obs==8)/length(obs)` chance to get 8 out of 15.
+
+### **3M4.** {-}
+```{r}
+obs <- rbinom(length(samp), 9, samp)
+simplehist(obs, main='Posterior Predictive Check, 9 Draws')
+```
+
+## Hard {-}
+
+### **3H1.** {-}
+This is straight forward, especially using the hint in the book.
+```{r}
+data(homeworkch3)
+nboys <- sum(birth1) + sum(birth2)
+n <- 200
+p_grid <- seq(0,1,length.out=1000)
+p <- dbinom(nboys, n, p_grid)
+plot(p_grid, p, type='l')
+```
+
+The parameter value that maximizes the posterior probability is `r p_grid[max(p)==p]`
+
+### **3H2.** {-}
+I use `purrr::map` to make the previous algorithm more amenable to multiple $\alpha$ values. One thing worth mentioning is that it's clear that the lower alphas are subsets of the higher alphas.
+```{r, fig.height=15}
+samp <- sample(p_grid, 10000, replace=TRUE, prob=p)
+B <- order(d$y, decreasing = TRUE)
+y <- d$y[B]
+cumy <- cumsum(y)
+alphas <- c(.5,.89,.97)
+max_inds <- purrr::map(alphas, function(a) head(which(cumy > a*tail(cumy,1)),1)-1)
+
+subx <- purrr::map( max_inds, function(i) d$x[sort(B[1:i])])
+suby <- purrr::map( max_inds, function(i) d$y[sort(B[1:i])])
+
+par(mfcol=c(length(max_inds),1))
+
+# Use variable to suppress output since bookdown does not seem to like invisible().
+junk <- purrr::map2(subx,
+              suby, 
+              function(x,y) {
+    plot(d$x,d$y,type='l') 
+    plot.hpdi(x,y) 
+})
+
+```
+
+**3H3.** {-}
