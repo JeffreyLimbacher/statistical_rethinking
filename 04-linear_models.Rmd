@@ -107,3 +107,377 @@ dens(sample2.sigma, norm.comp=TRUE)
 ```
 
 ### 4.3.5 Fitting the model with `map` {-}
+
+```{r}
+
+data(Howell1)
+d <- Howell1
+d2 <- d[d$age>=18,]
+```
+
+```{r}
+flist <- alist(
+  height ~ dnorm(mu, sigma),
+  mu ~ dnorm(178, 20),
+  sigma ~ dunif(0, 50)
+)
+```
+
+```{r}
+m4.1 <- map(flist, data=d2)
+```
+```{r}
+precis(m4.1)
+```
+
+```{r}
+m4.2 <- map(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu ~ dnorm(178, .1),
+    sigma ~ dunif(0, 50)
+  ),
+  data=d2
+)
+precis(m4.2)
+```
+
+```{r 4.30}
+vcov(m4.1)
+```
+
+```{r 4.31}
+diag(vcov(m4.1))
+cov2cor(vcov(m4.1))
+```
+
+```{r 4.32}
+post <- extract.samples(m4.1, n=1e4)
+head(post)
+```
+
+```{r 4.33}
+precis(post)
+```
+
+## 4.4 Adding a Predictor {-}
+
+```{r 4.37}
+plot(d2$height ~ d2$weight)
+```
+
+### 4.4.2
+
+```{r 4.38}
+data(Howell1)
+d <- Howell1
+d2 <- d[d$age >= 18,]
+
+#fit model
+m4.3 <- map(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a+b*weight,
+    a ~ dnorm(156, 100),
+    b ~ dnorm(0, 10),
+    sigma ~ dunif(0, 50)
+  ),
+  data = d2
+)
+```
+
+### 4.4.3
+
+```{r 4.40}
+precis(m4.3)
+```
+
+```{r 4.41}
+precis(m4.3, corr=TRUE)
+```
+
+```{r 4.42}
+d2$weight.c <- d2$weight - mean(d2$weight)
+```
+
+```{r 4.43 + 4.44}
+m4.4 <- map(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a+b*weight.c,
+    a ~ dnorm(178, 100),
+    b ~ dnorm(0, 10),
+    sigma ~ dunif(0, 50)
+  ),
+  data = d2
+)
+precis(m4.4, corr=TRUE)
+```
+
+```{r 4.45}
+plot(height ~ weight, data = d2)
+abline(a=coef(m4.3)['a'], b=coef(m4.3)['b'])
+```
+
+```{r 4.46}
+post <- extract.samples(m4.3)
+post[1:5,]
+```
+
+The below code fails sometimes. Just rerun if it fails.
+
+```{r, fig.height=7}
+fit_map <- function(N){
+  dN <- d2[1:N,]
+  mN <- map(
+      alist(
+      height ~ dnorm(mu, sigma),
+      mu <- a+b*weight,
+      a ~ dnorm(178, 100),
+      b ~ dnorm(0, 10),
+      sigma ~ dunif(0, 50)
+    ),
+    data = dN
+  )
+  post <- extract.samples(mN, n=20)
+  plot(dN$weight, dN$height, 
+       xlim=range(d2$weight), ylim=range(d2$height),
+       col=rangi2, xlab='weight', ylab='height')
+  mtext(concat('N = ', N))
+  for( i in 1:20){
+    abline(a=post$a[i], b=post$b[i], col=col.alpha('black', .3))
+  }
+  return(post)
+}
+par(mfcol=c(2,2))
+
+Ns = c(10, 50, 150, 352)
+posts <- c()
+for(N in Ns){
+  post <- fit_map(N)
+  posts <- c(posts, post)
+}
+```
+
+```{r 4.51 + 4.52}
+mu_at_50 <- post$a + post$b*50
+HPDI(mu_at_50, prob=.89)
+```
+
+```{r 4.53}
+mu <- link(m4.3)
+str(mu)
+```
+
+```{r 4.54}
+weight.seq <- seq(from=25, to=70, by=1)
+mu <- link(m4.3, data=data.frame(weight=weight.seq))
+str(mu)
+```
+
+```{r 4.55}
+plot(height ~ weight, d2, type='n')
+#I use matpoints to skip the loop and achieve the same effect.
+matpoints(weight.seq, t(mu), pch=16, lty=1, col=col.alpha(rangi2,.1))
+```
+
+```{r 4.56}
+print('mu.mean:')
+(mu.mean <- apply(mu, 2, mean))
+print('mu.HPDI:')
+(mu.HPDI <- apply(mu, 2, HPDI, prob=.89))
+```
+
+```{r 4.57}
+plot( height ~ weight, data=d2, col=col.alpha(rangi2,.5))
+lines(weight.seq, mu.mean)
+shade(mu.HPDI, weight.seq)
+```
+
+```{r 4.59}
+sim.height <- sim(m4.3, data=list(weight=weight.seq))
+str(sim.height)
+```
+
+```{r 4.60}
+(height.PI <- apply(sim.height, 2, PI, prob=.89))
+```
+```{r 4.61}
+plot(height ~ weight, d2, col=col.alpha(rangi2,.5))
+lines(weight.seq, mu.mean)
+shade(mu.HPDI, weight.seq)
+shade(height.PI, weight.seq)
+```
+
+# 4.5 Polynomial Regression {-}
+
+```{r 4.64}
+library(rethinking)
+data(Howell1)
+d <- Howell1
+str(d)
+```
+```{r age_curve}
+plot(height ~ weight, data = d)
+```
+
+```{r 4.65+4.66}
+d$weight.s <- (d$weight - mean(d$weight)) / sd(d$weight)
+d$weight.s2 <- d$weight.s^2
+m4.5 <- map(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + b1*weight.s + b2*weight.s2,
+    a ~ dnorm(178, 100),
+    b1 ~ dnorm(0, 10),
+    b2 ~ dnorm(0, 10),
+    sigma ~ dunif(0, 50)
+  ), data = d
+)
+```
+
+```{r 4.67}
+precis(m4.5)
+```
+
+```{r 4.68+4.69}
+weight.seq <- seq(from=-2.2, to=2, length.out=30)
+pred_dat <- list(weight.s=weight.seq, weight.s2=weight.seq^2)
+mu <- link(m4.5, data=pred_dat)
+mu.mean <- apply(mu, 2, mean)
+mu.PI <- apply(mu, 2, PI, prob=.89)
+sim.height <- sim(m4.5, data=pred_dat)
+height.PI <- apply(sim.height, 2, PI, prob=.89)
+plot(height ~ weight.s, d, col=col.alpha(rangi2, .5))
+lines(weight.seq, mu.mean)
+shade(mu.PI, weight.seq)
+shade(height.PI, weight.seq)
+```
+
+
+```{r 4.70}
+d$weight.s3 <- d$weight.s^3
+m4.6 <- map(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + b1*weight.s + b2*weight.s2 + b3*weight.s3,
+    a ~ dnorm(178, 100),
+    b1 ~ dnorm(0, 10),
+    b2 ~ dnorm(0, 10),
+    b3 ~ dnorm(0, 10),
+    sigma ~ dunif(0, 50)
+  ), data = d
+)
+```
+
+```{r plot_cubic}
+weight.seq <- seq(from=-2.2, to=2, length.out=30)
+pred_dat <- list(weight.s=weight.seq, weight.s2=weight.seq^2, weight.s3 = weight.seq^3)
+mu <- link(m4.6, data=pred_dat)
+mu.mean <- apply(mu, 2, mean)
+mu.PI <- apply(mu, 2, PI, prob=.89)
+sim.height <- sim(m4.6, data=pred_dat)
+height.PI <- apply(sim.height, 2, PI, prob=.89)
+plot(height ~ weight.s, d, col=col.alpha(rangi2, .5))
+lines(weight.seq, mu.mean)
+shade(mu.PI, weight.seq)
+shade(height.PI, weight.seq)
+```
+
+# 4.7 Practice {-}
+
+## Easy {-}
+
+### **4E1** {-}
+
+The likelihood is $y_i$. This specifies how likely a certain piece of data is given the parameters $\mu$ and $\sigma$
+
+### **4E2** {-}
+
+The two parameters are $\mu$ and $\sigma$.
+
+### **4E3** {-}
+
+$$
+P(\mu, \sigma | y_i ) =  \frac{ \prod_i f(y_i | \mu, \sigma) f(\mu | 0, 10) /10}{\int \prod_i f(y_i | \mu, \sigma)f(\mu | 0, 10) /10}
+$$
+
+where $f$ is the likelihood for the normal distribution, e.g. $f(x | \mu, \sigma) = \frac{1}{\sqrt{2 \pi \sigma^2}} \exp^{-(x-\mu)^2 / (2 \sigma^2)}$
+
+### **4E4** {-}
+
+$ \mu_i = \alpha + \beta x_i $
+
+### **4E5** {-}
+
+3 parameters: $\alpha$, $\beta$, $\sigma$
+
+## Medium {-}
+
+### **4M1** {-}
+
+```{r 4m1}
+nsims <- 1e4
+mu <- rnorm(nsims, 0, 10)
+sigma <- runif(nsims, 0, 10)
+y <- rnorm(nsims, mu, sigma)
+hist(y)
+```
+
+### **4M2** {-}
+
+```{r 4m2}
+
+alist(
+  height ~ dnorm(mu, sigma),
+  mu ~ dnorm(0, 10),
+  sigma ~ dunif(0, 10)
+)
+```
+
+### **4M3** {-}
+
+$$
+y_i \sim \text{Normal}(\mu, \sigma)\\
+\mu = \alpha + \beta x_i \\
+\alpha \sim \text{Normal}(0, 50)\\
+\beta \sim \text{Uniform}(0, 10)\\
+\sigma \sim \text{Uniform}(0, 50)
+$$
+
+### **4M4** {-} 
+
+$$
+y_i \sim \text{Normal}(\mu, \sigma)\\
+\mu = \alpha + \beta x_i \\
+\alpha \sim \text{Normal}(160, 50)\\
+\beta \sim \text{Uniform}(0, 10)\\
+\sigma \sim \text{Uniform}(0, 50)
+$$
+We really don't have any idea what age the students, so we don't even have any good reason to think they will grow year to year. It's a little silly to allow Beta to be negative though, so I use a uniform distribution.
+
+### **4M5** {-}
+
+New model:
+$$
+y_i \sim \text{Normal}(\mu, \sigma)\\
+\mu = \alpha + \beta x_i \\
+\alpha \sim \text{Normal}(120, 50)\\
+\beta \sim \text{Uniform}(0, 10)\\
+\sigma \sim \text{Uniform}(0, 50)
+$$
+
+I just moved the mean. 
+
+### **4M6** {-}
+
+New model:
+$$
+y_i \sim \text{Normal}(\mu, \sigma)\\
+\mu = \alpha + \beta x_i \\
+\alpha \sim \text{Normal}(120, 50)\\
+\beta \sim \text{Uniform}(0, 10)\\
+\sigma \sim \text{Uniform}(0, 8)
+$$
+
+We simply don't allow sigma to be greater than 8 cm.
